@@ -1,20 +1,41 @@
 /*
- 
- *  Códigos de operación soportados:
- *      10  READ           Leer una palabra del teclado hacia una posición
- *      11  WRITE          Escribir una palabra desde una posición a pantalla
- *      20  LOAD           Cargar una palabra desde memoria al acumulador
- *      21  STORE          Almacenar una palabra del acumulador en memoria
- *      30  ADD            Sumar una palabra de memoria al acumulador
- *      31  SUBTRACT       Restar una palabra de memoria al acumulador
- *      32  DIVIDE         Dividir el acumulador entre una palabra de memoria
- *      33  MULTIPLY       Multiplicar una palabra de memoria al acumulador
- *      40  BRANCH         Salto incondicional a una posición de memoria
- *      41  BRANCHNEG      Salto si el acumulador es negativo
- *      42  BRANCHZERO     Salto si el acumulador es cero
- *      43  HALT           Detener la ejecución del programa
+ * ============================================================================
+ *  SIMPLETRON - Simulador de la Computadora Simpletron (SML)
+ * ============================================================================
+ *  Materia: PROGRAMACION AVANZADA 101-142-TCD202-011
+ *  Documento de referencia: "2. Un simulador de Computadora"
+ *  (Tomado de Deitel H.M. y Deitel P.J. (1998). Como programar en C,
+ *   1ra Edicion. Mexico. Prentice Hall Latinoamerica. Usado con propositos
+ *   educativos.)
  *
- *  Autor: (Leonardo)
+ *  Requisitos verificables cubiertos:
+ *   1. Memoria de 100 posiciones inicializada correctamente.
+ *   2. Captura de instrucciones hasta recibir 9999 (centinela).
+ *   3. Validacion de las palabras introducidas durante la carga
+ *      (rango permitido: -9999 a +9998; 9999 queda reservado como
+ *      centinela y por eso NO es un valor de dato valido).
+ *   4. Registros accumulator, instructionCounter, instructionRegister,
+ *      operationCode y operand.
+ *   5. Ciclo completo de busqueda, decodificacion y ejecucion.
+ *   6. Implementacion de las doce operaciones SML indicadas.
+ *   7. Vaciado formateado de todos los registros y de la memoria completa.
+ *   8. Deteccion de division entre cero, codigo de operacion invalido,
+ *      desbordamiento del acumulador (resultado > +9999 o < -9999) y
+ *      otros errores fatales pertinentes.
+ *   9. Ejecucion comprobable de programas SML correctos y de casos que
+ *      provoquen errores fatales (ver ejemplos_prueba/ en el repositorio).
+ *
+ *  Codigos de operacion (las doce indicadas):
+ *      10  READ            30  ADD
+ *      11  WRITE           31  SUBTRACT
+ *      20  LOAD            32  DIVIDE
+ *      21  STORE           33  MULTIPLY
+ *                          40  BRANCH
+ *                          41  BRANCHNEG
+ *                          42  BRANCHZERO
+ *                          43  HALT
+ *
+ *  Formato de instruccion: ±DDDD (2 digitos de operacion + 2 de operando)
  * ============================================================================
  */
 
@@ -28,10 +49,16 @@
 class Simpletron {
 public:
     static const int MEMORY_SIZE = 100;
-    static const int MEMORY_MIN = -9999;
-    static const int MEMORY_MAX = 9999;
 
-    // Códigos de operación
+    // (2)/(3) Centinela y rango valido durante la carga del programa.
+    static const int SENTINEL = 9999;
+    static const int LOAD_MIN = -9999;
+    static const int LOAD_MAX = 9998; // 9999 esta reservado como centinela
+
+    // (8) Cota de desbordamiento para resultados aritmeticos.
+    static const int OVERFLOW_MIN = -9999;
+    static const int OVERFLOW_MAX = 9999;
+
     enum OperationCode {
         READ       = 10,
         WRITE      = 11,
@@ -47,6 +74,8 @@ public:
         HALT       = 43
     };
 
+    // (1) Memoria de 100 posiciones inicializada correctamente (a 0 por
+    // el inicializador de std::array{}).
     Simpletron()
         : memory{},
           accumulator(0),
@@ -57,15 +86,18 @@ public:
           isRunning(true) {}
 
     // ----------------------------------------------------------------------
-    // Fase de carga: lee el programa SML introducido por el usuario y lo
-    // almacena en memoria a partir de la posición 00.
+    // (2)(3) Fase de carga: lee el programa SML introducido por el usuario,
+    // valida cada palabra y detiene la carga al recibir el centinela 9999.
     // ----------------------------------------------------------------------
-    bool load() {
-        std::cout << "*** Bienvenido al simulador Simpletron ***\n";
-        std::cout << "*** Ingrese su programa en Simpletron Machine Language (SML) ***\n";
-        std::cout << "*** una instruccion (o palabra de datos) por linea.        ***\n";
-        std::cout << "*** Escriba -99999 para finalizar la introduccion del      ***\n";
-        std::cout << "*** programa.                                              ***\n\n";
+    void load() {
+        std::cout << "*** Bienvenido a Simpletron! ***\n";
+        std::cout << "*** Introduzca su programa una instruccion ***\n";
+        std::cout << "*** (o palabra de datos) a la vez en la linea ***\n";
+        std::cout << "*** de texto de entrada. Yo indicare el numero ***\n";
+        std::cout << "*** de posicion y una interrogacion (?). Usted ***\n";
+        std::cout << "*** tecleara entonces la palabra para esa ***\n";
+        std::cout << "*** posicion. Escriba 9999 para terminar de ***\n";
+        std::cout << "*** introducir su programa. ***\n\n";
 
         int address = 0;
         int instruction = 0;
@@ -80,13 +112,15 @@ public:
                 continue;
             }
 
-            if (instruction == -99999) {
+            if (instruction == SENTINEL) {
                 break;
             }
 
-            if (instruction < MEMORY_MIN || instruction > MEMORY_MAX) {
-                std::cerr << "*** El valor debe estar entre " << MEMORY_MIN
-                          << " y " << MEMORY_MAX << ". Intente de nuevo. ***\n";
+            // (3) Validacion: reintentar hasta capturar un numero valido.
+            if (instruction < LOAD_MIN || instruction > LOAD_MAX) {
+                std::cerr << "*** El valor debe estar en el intervalo ["
+                          << LOAD_MIN << ", " << LOAD_MAX
+                          << "]. Intente de nuevo. ***\n";
                 continue;
             }
 
@@ -94,17 +128,14 @@ public:
             ++address;
         }
 
-        std::cout << "\n*** El programa se ha cargado en memoria correctamente ***\n\n";
-        return true;
+        std::cout << "\n*** Se termino de cargar el programa ***\n";
+        std::cout << "*** Comienza la ejecucion del programa ***\n\n";
     }
 
     // ----------------------------------------------------------------------
-    // Fase de ejecución: recorre la memoria ejecutando cada instrucción
-    // hasta encontrar HALT, un error, o el fin de la memoria.
+    // (5) Ciclo de busqueda, decodificacion y ejecucion.
     // ----------------------------------------------------------------------
     void execute() {
-        std::cout << "*** Inicio de la ejecucion ***\n\n";
-
         while (isRunning) {
             if (instructionCounter < 0 || instructionCounter >= MEMORY_SIZE) {
                 reportError("El contador de instruccion salio de rango de memoria.");
@@ -112,11 +143,15 @@ public:
                 return;
             }
 
+            // Busqueda (fetch)
             instructionRegister = memory[instructionCounter];
-            operationCode = instructionRegister / 100;              // primeros 2 digitos
-            operand = instructionRegister % 100;                    // ultimos 2 digitos
+
+            // Decodificacion (decode): separar OP y ADDR
+            operationCode = instructionRegister / 100;
+            operand = instructionRegister % 100;
             if (operand < 0) operand = -operand;
 
+            // Ejecucion (execute)
             switch (operationCode) {
                 case READ:
                     if (!doRead()) return;
@@ -158,7 +193,7 @@ public:
                     }
                     break;
                 case HALT:
-                    std::cout << "*** Fin de la ejecucion (HALT) ***\n\n";
+                    std::cout << "*** Termino la ejecucion de Simpletron ***\n\n";
                     isRunning = false;
                     break;
                 default:
@@ -170,7 +205,7 @@ public:
             ++instructionCounter;
         }
 
-        std::cout << "*** Ejecucion terminada exitosamente ***\n\n";
+        // (7)(9) Vaciado tras una terminacion normal (HALT).
         dumpCore();
     }
 
@@ -192,8 +227,9 @@ private:
         return true;
     }
 
+    // (8) Deteccion de desbordamiento del acumulador.
     bool checkOverflow(long value) {
-        if (value < MEMORY_MIN || value > MEMORY_MAX) {
+        if (value < OVERFLOW_MIN || value > OVERFLOW_MAX) {
             reportError("Desbordamiento del acumulador (overflow).");
             dumpCore();
             return false;
@@ -201,14 +237,16 @@ private:
         return true;
     }
 
+    // ------------------------------------------------------------------
+    // (6) Las doce operaciones SML
+    // ------------------------------------------------------------------
     bool doRead() {
         if (!checkAddress(operand)) return false;
         int value;
         std::cout << "Introduzca un entero (direccion " << std::setw(2)
                   << std::setfill('0') << operand << ") -> ";
-        while (!(std::cin >> value) || value < MEMORY_MIN || value > MEMORY_MAX) {
-            std::cerr << "*** Entrada invalida. Debe ser un entero entre "
-                      << MEMORY_MIN << " y " << MEMORY_MAX << ". Intente de nuevo. ***\n";
+        while (!(std::cin >> value) || value < LOAD_MIN || value > SENTINEL) {
+            std::cerr << "*** Entrada invalida. Intente de nuevo. ***\n";
             std::cin.clear();
             std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             std::cout << "Introduzca un entero (direccion " << std::setw(2)
@@ -264,7 +302,7 @@ private:
     bool doDivide() {
         if (!checkAddress(operand)) return false;
         if (memory[operand] == 0) {
-            reportError("Intento de division entre cero.");
+            reportError("Intento de dividir entre cero.");
             dumpCore();
             return false;
         }
@@ -275,45 +313,11 @@ private:
     }
 
     void reportError(const std::string &message) {
-        std::cerr << "\n*** Error en tiempo de ejecucion: " << message << " ***\n";
-        std::cerr << "*** Simpletron finalizando la ejecucion. ***\n\n";
+        std::cerr << "\n*** " << message << " ***\n";
+        std::cerr << "*** La ejecucion de Simpletron termino anormalmente ***\n\n";
     }
 
-    // ----------------------------------------------------------------------
-    // Volcado de memoria (core dump): muestra el estado completo del
-    // registro y de la memoria, tal como se pide en un simulador clasico.
-    // ----------------------------------------------------------------------
-    void dumpCore() {
-        std::cout << std::setfill(' '); // evitar que el relleno '0' de otras
-                                         // impresiones se "pegue" al stream
-        std::cout << "\nREGISTROS:\n";
-        std::cout << "Acumulador             " << formatWord(accumulator) << '\n';
-        std::cout << "contador de instruccion       "
-                  << std::setw(2) << std::setfill('0') << instructionCounter << '\n';
-        std::cout << "registro de instruccion     " << formatWord(instructionRegister) << '\n';
-        std::cout << "codigo de operacion             "
-                  << std::setw(2) << std::setfill('0') << operationCode << '\n';
-        std::cout << "operando                      "
-                  << std::setw(2) << std::setfill('0') << operand << "\n\n";
-
-        std::cout << "MEMORIA:\n";
-        std::cout << "     ";
-        for (int col = 0; col < 10; ++col) {
-            std::cout << std::setfill(' ') << std::setw(6) << col;
-        }
-        std::cout << '\n';
-
-        for (int row = 0; row < MEMORY_SIZE / 10; ++row) {
-            std::cout << std::setfill('0') << std::setw(2) << row * 10 << std::setfill(' ') << " ";
-            for (int col = 0; col < 10; ++col) {
-                std::cout << std::setw(6) << formatWord(memory[row * 10 + col]);
-            }
-            std::cout << '\n';
-        }
-        std::cout << '\n';
-    }
-
-    // Formatea una palabra con signo y 4 digitos, ej: +0042, -0007
+    // Formatea una palabra con signo y 4 digitos: +0042, -0007
     static std::string formatWord(int value) {
         std::string sign = (value < 0) ? "-" : "+";
         int absValue = std::abs(value);
@@ -323,6 +327,42 @@ private:
         }
         return sign + digits;
     }
+
+    // ------------------------------------------------------------------
+    // (7) Vaciado (dump) de todos los registros y de la memoria completa,
+    // con el mismo formato mostrado en el documento de referencia:
+    // encabezado de columnas 0-9, filas 0-9 (decena de la direccion).
+    // ------------------------------------------------------------------
+    void dumpCore() {
+        std::cout << "Registros:\n";
+        std::cout << "acumulador:                    " << formatWord(accumulator) << '\n';
+        std::cout << "instructionCounter:                   "
+                  << std::setw(2) << std::setfill('0') << instructionCounter << '\n';
+        std::cout << std::setfill(' ');
+        std::cout << "instructionRegister:               " << formatWord(instructionRegister) << '\n';
+        std::cout << "operationcode:                          "
+                  << std::setw(2) << std::setfill('0') << operationCode << '\n';
+        std::cout << std::setfill(' ');
+        std::cout << "operand:                                "
+                  << std::setw(2) << std::setfill('0') << operand << "\n\n";
+        std::cout << std::setfill(' ');
+
+        std::cout << "MEMORIA\n";
+        std::cout << "    ";
+        for (int col = 0; col < 10; ++col) {
+            std::cout << std::setw(7) << col;
+        }
+        std::cout << '\n';
+
+        for (int row = 0; row < MEMORY_SIZE / 10; ++row) {
+            std::cout << std::setw(2) << row << "  ";
+            for (int col = 0; col < 10; ++col) {
+                std::cout << std::setw(7) << formatWord(memory[row * 10 + col]);
+            }
+            std::cout << '\n';
+        }
+        std::cout << '\n';
+    }
 };
 
 int main() {
@@ -331,3 +371,4 @@ int main() {
     sml.execute();
     return 0;
 }
+/*
